@@ -7,8 +7,6 @@ class TrafficEnv:
         self.yellow_light_time = 3  # Yellow light time in seconds
         self.state_index = 0  # Start from the first state in the dataset
         self.state = self.traffic_data.iloc[self.state_index].to_numpy()  # Initial state from data
-        self.max_proportion_to_pass = 0.75  # Max proportion of cars that can pass
-        self.min_cars_to_pass = 1  # Minimum cars threshold for full passing
         self.current_lane = 0  # Start with the first lane
 
     def reset(self):
@@ -17,22 +15,50 @@ class TrafficEnv:
         self.current_lane = 0  # Reset the current lane to the first lane
         return self.state
 
-    def calculate_reward(self, lane_actions, cars_passed, original_state):
-        cars_waiting_penalty = -sum(self.state) * 0.1  # Reduced penalty weight
-        
-        # Fairness penalty if a lane has over 50% of cars remaining after green light
-        fairness_penalty = 0
-        for i, cars in enumerate(self.state):
-            if cars > original_state[i] * 0.5:
-                fairness_penalty -= 100  # Keep this as is for strong disincentive
+    def calculate_cycle_time(self, actions):
+        total_cycle_time = 0
+        for cars_to_pass in actions:
+            green_time = 6 + (cars_to_pass - 1) * 2
+            total_cycle_time += green_time + self.yellow_light_time
+        return total_cycle_time
 
-        # Base reward for passing cars and total cars passed
-        reward = (cars_passed * 1.5) + cars_waiting_penalty + fairness_penalty
+    def calculate_reward(self, cars_to_pass, actions):
+        cars_waiting = self.state[self.current_lane]
+        reward = 0
+
+        # Calculate total cycle time based on actions
+        total_cycle_time = self.calculate_cycle_time(actions)
+
+        if total_cycle_time <= 120:
+            reward += cars_to_pass  # Reward proportional to the number of cars passed
+        else:
+            if cars_waiting >= 100:
+                if cars_to_pass <= int(cars_waiting * 0.5):
+                    reward = 50  # High reward for optimal decision
+                else:
+                    reward = -100  # Heavy penalty for wrong decision
+            elif 50 <= cars_waiting < 100:
+                if cars_to_pass <= int(cars_waiting * 0.7):
+                    reward = 40  # Medium reward for optimal decision
+                else:
+                    reward = -120  # Heavy penalty for wrong decision
+            elif 30 <= cars_waiting < 50:
+                if cars_to_pass <= int(cars_waiting * 0.8):
+                    reward = 30  # Small reward for optimal decision
+                else:
+                    reward = -150  # Heavy penalty for wrong decision
+            elif cars_waiting < 30:
+                if cars_to_pass == cars_waiting:
+                    reward = 20  # Small reward for allowing all cars to pass
+                else:
+                    reward = -200  # Penalty for exceeding the number of cars
+
+        print(f"Calculating Reward: Cars Waiting: {cars_waiting}, Cars Allowed to Pass: {cars_to_pass}, Reward: {reward}")
         return reward
 
     def step(self, actions):
         original_state = self.state.copy()
-        
+
         # Skip lanes with 0 cars and apply penalty if opened
         while self.state[self.current_lane] == 0:
             print(f"Skipping lane {self.current_lane + 1} due to 0 cars.")
@@ -42,23 +68,11 @@ class TrafficEnv:
                 print("All lanes are empty. Ending simulation.")
                 return self.state, -10, True, {}  # End the simulation with a penalty
 
-        # Calculate total cars across all lanes
-        total_cars = sum(self.state)
+        # Calculate cars waiting in the current lane
         cars_waiting = self.state[self.current_lane]
 
-        # Determine cars to pass based on the waiting threshold
-        if total_cars <= 120:  # Allow all cars to pass if total time is within the threshold
-            cars_to_pass = cars_waiting
-        else:
-            # Apply threshold logic for passing cars based on the waiting cars
-            if cars_waiting >= 100:
-                cars_to_pass = max(1, int(cars_waiting * 0.5))
-            elif cars_waiting >= 50:
-                cars_to_pass = max(1, int(cars_waiting * 0.7))
-            elif cars_waiting >= 30:
-                cars_to_pass = max(1, int(cars_waiting * 0.2))
-            else:
-                cars_to_pass = max(1, cars_waiting)  # Allow at least 1 car to pass
+        # Determine cars to pass based on the action provided
+        cars_to_pass = actions[self.current_lane]
 
         # Ensure we don't exceed the available cars in the lane
         if self.state[self.current_lane] >= cars_to_pass:
@@ -67,21 +81,16 @@ class TrafficEnv:
             cars_to_pass = self.state[self.current_lane]
             self.state[self.current_lane] = 0
 
-        # Calculate green time based on cars allowed to pass
-        green_time = 6 + (cars_to_pass - 1) * 2
-
-        # Calculate reward based on new and original state
-        reward = self.calculate_reward(actions, cars_to_pass, original_state)
+        # Calculate reward based on the number of cars passed and cycle time
+        reward = self.calculate_reward(cars_to_pass, actions)
 
         # Print details of the current state, original state, lane, green time, and reward
         print(f"Current Lane: {self.current_lane + 1}")
         print(f"Original State: {original_state}")
         print(f"Cars Allowed to Pass: {cars_to_pass}")
-        print(f"Green Time Duration: {green_time} seconds")
         print(f"New State: {self.state}")
         print(f"Reward: {reward}")
 
-        # Move to the next lane in round-robin fashion
         self.current_lane = (self.current_lane + 1) % len(self.state)
 
         # Check if we've reached the last row in the traffic data
@@ -92,7 +101,7 @@ class TrafficEnv:
         return self.state, reward, done, {}
 
 # Load the CSV file and create a traffic environment
-traffic_data = pd.read_csv("combined_intersections.csv", header=None)
+traffic_data = pd.read_csv("output_file2.csv", header=None)
 env = TrafficEnv(traffic_data)
 
 # Reset environment
@@ -100,8 +109,8 @@ state = env.reset()
 
 # Simulate steps
 for _ in range(len(traffic_data)):
-    # Calculate actions based on half the lane size as an example
-    actions = [max(1, int(state[i] * 0.5)) for i in range(len(state))]
+    # Allow all cars to pass based on the lane's total count
+    actions = [state[i] for i in range(len(state))]
     state, reward, done, _ = env.step(actions)
     if done:
         break

@@ -49,8 +49,7 @@ class DQNAgent:
 
         minibatch = random.sample(self.memory, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*minibatch)
-
-        # Prepare batches for training
+    
         states = np.array(states)
         next_states = np.array(next_states)
         targets = self.model.predict(states)
@@ -77,7 +76,7 @@ class DQNAgent:
 
 if __name__ == "__main__":
     # Load traffic data and initialize environment
-    traffic_data = pd.read_csv("combined_intersections.csv", header=None)
+    traffic_data = pd.read_csv("output_file2.csv", header=None)
     env = TrafficEnv(traffic_data)
 
     # Initialize DQN agent
@@ -93,8 +92,7 @@ if __name__ == "__main__":
 
         while not done:
             action = agent.act(state)
-            actions = [0] * action_size  # Initialize all actions to 0
-            actions[action] = max(1, int(state[action] * 0.75))  # Set cars to pass for the selected lane
+            actions = [max(1, int(state[i] * 0.5)) for i in range(state_size)]  # Ensure reasonable actions
 
             # Take action in environment
             next_state, reward, done, _ = env.step(actions)
