@@ -6,12 +6,12 @@ from tensorflow.keras import layers, models, optimizers
 import pandas as pd
 from traffic_env import TrafficEnv
 
-# DQN Network
 def build_model(input_dim, output_dim):
-    model = models.Sequential()
-    model.add(layers.Dense(64, input_dim=input_dim, activation='relu'))
-    model.add(layers.Dense(64, activation='relu'))
-    model.add(layers.Dense(output_dim, activation='linear'))
+    model = models.Sequential([
+        layers.Dense(64, input_dim=input_dim, activation='relu'),
+        layers.Dense(64, activation='relu'),
+        layers.Dense(output_dim, activation='linear')  # Output size: action_size + state_size (for green times)
+    ])
     model.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001))
     return model
 
@@ -26,9 +26,9 @@ class DQNAgent:
         self.epsilon_min = epsilon_min
         self.batch_size = batch_size
 
-        # Initialize main and target networks
-        self.model = build_model(state_size, action_size)
-        self.target_model = build_model(state_size, action_size)
+        # The model now predicts both the lane to select and the green time predictions
+        self.model = build_model(state_size, action_size + state_size)  # action_size for lane selection, state_size for green times
+        self.target_model = build_model(state_size, action_size + state_size)
         self.update_target_model()
 
     def update_target_model(self):
@@ -38,10 +38,26 @@ class DQNAgent:
         self.memory.append((state, action, reward, next_state, done))
 
     def act(self, state):
+        available_lanes = [i for i in range(self.state_size) if state[i] > 0]
+
+        if len(available_lanes) == 0:
+            print("All lanes are empty. Choosing no-op action.")
+            return [random.randrange(self.action_size), [0 for _ in range(self.state_size)], [0 for _ in range(self.state_size)]]
+
         if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)  # Random action
+            action = random.choice(available_lanes)
+            cars_to_pass = [random.randint(1, state[i]) if state[i] > 0 else 0 for i in range(self.state_size)]
+            predicted_green_times = np.clip([random.uniform(0, 120) for _ in range(self.state_size)], 0, 120)
+            return [action, cars_to_pass, predicted_green_times]
+
         q_values = self.model.predict(state[np.newaxis])[0]
-        return np.argmax(q_values)  # Best action
+        available_lanes_q_values = [(q_values[i], i) for i in range(self.state_size) if state[i] > 0]
+        best_action = max(available_lanes_q_values)[1]
+
+        cars_to_pass = [min(int(q_values[i + self.state_size]), state[i]) if state[i] > 0 else 0 for i in range(self.state_size)]
+        predicted_green_times = np.clip(q_values[self.action_size:], 0, 120)
+
+        return [best_action, cars_to_pass, predicted_green_times]
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -49,7 +65,7 @@ class DQNAgent:
 
         minibatch = random.sample(self.memory, self.batch_size)
         states, actions, rewards, next_states, dones = zip(*minibatch)
-    
+
         states = np.array(states)
         next_states = np.array(next_states)
         targets = self.model.predict(states)
@@ -58,30 +74,37 @@ class DQNAgent:
         for i in range(self.batch_size):
             target = rewards[i]
             if not dones[i]:
-                target += self.gamma * np.amax(target_next[i])
-            targets[i][actions[i]] = target
+                target += self.gamma * np.amax(target_next[i][:self.action_size])
+            targets[i][actions[i][0]] = target  # Update lane selection Q-value
+            
+            # Ensure the targets array has the correct shape
+            cars_to_pass_shape = self.action_size + self.state_size
+            if targets[i].shape[0] >= cars_to_pass_shape + self.state_size:
+                # Update cars to pass predictions
+                for j in range(self.state_size):
+                    targets[i][self.action_size + j] = actions[i][1][j]
+                # Update green time predictions
+                for j in range(self.state_size):
+                    targets[i][self.action_size + self.state_size + j] = actions[i][2][j]
 
         self.model.fit(states, targets, epochs=1, verbose=0, batch_size=self.batch_size)
 
-        # Decay epsilon
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
     def load(self, name):
-        self.model.load_weights(name + ".weights.h5")  # Load with .weights.h5
+        self.model.load_weights(name + ".weights.h5")
 
     def save(self, name):
-        self.model.save_weights(name + ".weights.h5")  # Ensure the filename ends with .weights.h5
+        self.model.save_weights(name + ".weights.h5")
 
-
+# Main training loop
 if __name__ == "__main__":
-    # Load traffic data and initialize environment
     traffic_data = pd.read_csv("output_file2.csv", header=None)
     env = TrafficEnv(traffic_data)
 
-    # Initialize DQN agent
-    state_size = env.state.shape[0]  # Number of lanes
-    action_size = state_size  # Each lane can have one action (cars to pass)
+    state_size = env.state.shape[0]
+    action_size = state_size  # Number of lanes
     agent = DQNAgent(state_size=state_size, action_size=action_size)
 
     episodes = 1000
@@ -91,24 +114,21 @@ if __name__ == "__main__":
         total_reward = 0
 
         while not done:
-            action = agent.act(state)
-            actions = [max(1, int(state[i] * 0.5)) for i in range(state_size)]  # Ensure reasonable actions
+            action, cars_to_pass, predicted_green_times = agent.act(state)  # Unpack all three values
+            actions = cars_to_pass  # Use the predicted number of cars to pass as actions
 
             # Take action in environment
-            next_state, reward, done, _ = env.step(actions)
-            agent.remember(state, action, reward, next_state, done)
+            next_state, reward, done, _ = env.step(actions, predicted_green_times)
+            agent.remember(state, [action, cars_to_pass, predicted_green_times], reward, next_state, done)  # Update to match action structure
 
             state = next_state
             total_reward += reward
 
-            # Train agent with experience replay
             agent.replay()
 
-        # Update target model
         agent.update_target_model()
 
         print(f"Episode {e+1}/{episodes}, Total Reward: {total_reward}, Epsilon: {agent.epsilon:.2f}")
 
-        # Save the model every 50 episodes
-        if e % 50 == 0:
+        if e % 20 == 0:
             agent.save(f"dqn_model_tf_{e}")
