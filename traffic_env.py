@@ -40,48 +40,62 @@ class TrafficEnv:
             total_cycle_time += green_time + self.yellow_light_time
         return total_cycle_time
 
-    def calculate_reward(self, cars_to_pass, cars_waiting, predicted_green_time):
+    def calculate_reward(self, predicted_cars_to_pass, cars_allowed_to_pass, predicted_green_time):
         reward = 0
 
         # Adaptive penalty based on the training phase (step count)
-        penalty_factor = min(1, self.training_step / 1000)  # Gradually increase penalty with more training steps
+        #penalty_factor = min(1, self.training_step / 1000)  # Gradually increase penalty with more training steps
 
         # Calculate the formula green time
-        formula_green_time = self.calculate_formula_green_time(cars_to_pass)
+        formula_green_time = self.calculate_formula_green_time(predicted_cars_to_pass)
 
         # Reward based on congestion levels and clearing lanes quickly
-        if cars_waiting >= 100:
-            if cars_to_pass >= int(cars_waiting * 0.6):
+        if cars_allowed_to_pass >= 100:
+            if (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.6)) and (predicted_cars_to_pass < int(cars_allowed_to_pass * 0.75)):
                 reward += 500  # High reward for optimal decision
+            elif (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.8)):
+                reward += -750 
             else:
-                reward += -750 * penalty_factor  # Apply adaptive penalty for wrong decision
-        elif 50 <= cars_waiting < 100:
-            if cars_to_pass >= int(cars_waiting * 0.7):
+                reward += -1000   # Apply adaptive penalty for wrong decision
+        elif 50 <= cars_allowed_to_pass < 100:
+            if (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.7)) and (predicted_cars_to_pass <= int(cars_allowed_to_pass * 0.87)):
                 reward += 500  # Medium reward for optimal decision
+            elif (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.9)):
+                reward += -800 
+            elif predicted_cars_to_pass<=50*0.7:
+                reward+= -1000
             else:
-                reward += -700 * penalty_factor  # Apply adaptive penalty for wrong decision
-        elif 30 <= cars_waiting < 50:
-            if cars_to_pass >= int(cars_waiting * 0.8):
+                reward += -1000   # Apply adaptive penalty for wrong decision
+        elif 30 <= cars_allowed_to_pass < 50:
+            if predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.8):
                 reward += 500  # Small reward for optimal decision
+            elif predicted_cars_to_pass<=(30 *0.8):
+                reward += -1000 
             else:
-                reward += -650 * penalty_factor  # Apply adaptive penalty for wrong decision
-        elif cars_waiting < 30:
-            if cars_to_pass == cars_waiting:
+                reward += -1000   # Apply adaptive penalty for wrong decision
+        elif cars_allowed_to_pass < 30:
+            if predicted_cars_to_pass == cars_allowed_to_pass:
                 reward += 500  # Small reward for allowing all cars to pass
+            elif predicted_cars_to_pass < cars_allowed_to_pass:
+                reward += -1000 
             else:
-                reward += -800 * penalty_factor  # Apply adaptive penalty for exceeding the number of cars
+                reward += -1000   # Apply adaptive penalty for exceeding the number of cars
 
         # Reward based on the predicted green time
         if abs(predicted_green_time - formula_green_time) <= 5:
-            reward += 100  # Reward for being close to the formula
-        elif (predicted_green_time < formula_green_time):
-            reward += -250  # Penalty for underestimating green time
-        elif (predicted_green_time > formula_green_time + 5):
+            reward += 200  # Reward for being close to the formula
+        elif predicted_green_time < formula_green_time:
+            reward += -250
+            if predicted_green_time * 5 < formula_green_time:
+                reward += -300  # Penalty for underestimating green time
+        elif predicted_green_time > formula_green_time + 5:
             reward += -450  # Penalty for overestimating green time
+            if predicted_green_time > formula_green_time * 2:
+                reward += -200
 
-        # Apply additional penalty for predicting more cars than waiting
-        if cars_to_pass > cars_waiting:
-            reward += -300  # Penalty for overestimating the number of cars
+        # Apply additional penalty for predicting more cars than allowed to pass
+        if predicted_cars_to_pass > cars_allowed_to_pass:
+            reward += -2000  # Penalty for overestimating the number of cars
 
         # Apply a time-decay factor to incentivize quicker congestion reduction
         time_decay_factor = max(0, 50 - self.current_time // 10)  # Reduce reward as time progresses
@@ -113,20 +127,20 @@ class TrafficEnv:
                 done = False
                 return self.state, 0, done, {}
 
-        cars_waiting = self.state[self.current_lane]
-        cars_to_pass = max(1, min(actions[self.current_lane], cars_waiting))  # Ensure valid number of cars to pass
+        cars_allowed_to_pass = self.state[self.current_lane]  # Number of cars allowed to pass
+        predicted_cars_to_pass = max(1, min(actions[self.current_lane], cars_allowed_to_pass))  # Ensure valid number of cars to pass
         predicted_green_time = max(1, predicted_green_times[self.current_lane])  # Ensure positive green time
 
-        self.state[self.current_lane] -= cars_to_pass
+        self.state[self.current_lane] -= predicted_cars_to_pass
 
-        reward = self.calculate_reward(cars_to_pass, cars_waiting, predicted_green_time)
+        reward = self.calculate_reward(predicted_cars_to_pass, cars_allowed_to_pass, predicted_green_time)
 
         self.current_time += predicted_green_time + self.yellow_light_time
 
         print(f"Current Lane: {self.current_lane + 1}")
         print(f"Original State: {original_state}")
-        print(f"Cars Allowed to Pass: {cars_waiting}")
-        print(f"Predicted Cars to Pass: {cars_to_pass}")
+        print(f"Cars Allowed to Pass: {cars_allowed_to_pass}")
+        print(f"Predicted Cars to Pass: {predicted_cars_to_pass}")
         print(f"Predicted Green Time: {predicted_green_time} seconds")
         print(f"New State: {self.state}")
         print(f"Reward: {reward}")

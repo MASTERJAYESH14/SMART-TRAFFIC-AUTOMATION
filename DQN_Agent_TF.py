@@ -7,16 +7,19 @@ import pandas as pd
 from traffic_env import TrafficEnv
 
 def build_model(input_dim, output_dim):
-    model = models.Sequential([
-        layers.Dense(64, input_dim=input_dim, activation='relu'),
-        layers.Dense(64, activation='relu'),
-        layers.Dense(output_dim, activation='linear')  # Output size: action_size + state_size (for green times)
-    ])
-    model.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001))
+    # Utilize GPU if available
+    with tf.device('/GPU:0'):
+        model = models.Sequential([
+            layers.Input(shape=(input_dim,)),
+            layers.Dense(64, activation='relu'),
+            layers.Dense(64, activation='relu'),
+            layers.Dense(output_dim, activation='linear')  # Output size: action_size + state_size (for green times)
+        ])
+        model.compile(loss='mse', optimizer=optimizers.Adam(learning_rate=0.001))
     return model
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, gamma=0.99, epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.01, batch_size=32, memory_size=10000):
+    def __init__(self, state_size, action_size, gamma=0.99, epsilon=1.0, epsilon_decay=0.975, epsilon_min=0.01, batch_size=32, memory_size=10000):
         self.state_size = state_size
         self.action_size = action_size
         self.memory = deque(maxlen=memory_size)
@@ -68,26 +71,28 @@ class DQNAgent:
 
         states = np.array(states)
         next_states = np.array(next_states)
-        targets = self.model.predict(states)
-        target_next = self.target_model.predict(next_states)
+        # Utilize GPU if available
+        with tf.device('/GPU:0'):
+            targets = self.model.predict(states)
+            target_next = self.target_model.predict(next_states)
 
-        for i in range(self.batch_size):
-            target = rewards[i]
-            if not dones[i]:
-                target += self.gamma * np.amax(target_next[i][:self.action_size])
-            targets[i][actions[i][0]] = target  # Update lane selection Q-value
-            
-            # Ensure the targets array has the correct shape
-            cars_to_pass_shape = self.action_size + self.state_size
-            if targets[i].shape[0] >= cars_to_pass_shape + self.state_size:
-                # Update cars to pass predictions
-                for j in range(self.state_size):
-                    targets[i][self.action_size + j] = actions[i][1][j]
-                # Update green time predictions
-                for j in range(self.state_size):
-                    targets[i][self.action_size + self.state_size + j] = actions[i][2][j]
+            for i in range(self.batch_size):
+                target = rewards[i]
+                if not dones[i]:
+                    target += self.gamma * np.amax(target_next[i][:self.action_size])
+                targets[i][actions[i][0]] = target  # Update lane selection Q-value
 
-        self.model.fit(states, targets, epochs=1, verbose=0, batch_size=self.batch_size)
+                # Ensure the targets array has the correct shape
+                cars_to_pass_shape = self.action_size + self.state_size
+                if targets[i].shape[0] >= cars_to_pass_shape + self.state_size:
+                    # Update cars to pass predictions
+                    for j in range(self.state_size):
+                        targets[i][self.action_size + j] = actions[i][1][j]
+                    # Update green time predictions
+                    for j in range(self.state_size):
+                        targets[i][self.action_size + self.state_size + j] = actions[i][2][j]
+
+            self.model.fit(states, targets, epochs=1, verbose=0, batch_size=self.batch_size)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
