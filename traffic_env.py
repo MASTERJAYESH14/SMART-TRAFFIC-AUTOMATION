@@ -46,63 +46,83 @@ class TrafficEnv:
         # Calculate the formula green time
         formula_green_time = self.calculate_formula_green_time(predicted_cars_to_pass)
 
-        # Reward based on congestion levels and clearing lanes quickly
+        # Calculate efficiency
+        efficiency = predicted_cars_to_pass / predicted_green_time if predicted_green_time > 0 else 0
+
+        # Normalize green time
+        green_time_factor = predicted_green_time / formula_green_time if formula_green_time > 0 else 1
+
+        # Reward based on congestion levels
+        congestion_ratio = predicted_cars_to_pass / cars_allowed_to_pass if cars_allowed_to_pass > 0 else 0
+
         if cars_allowed_to_pass >= 100:
-            if (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.6)) and (predicted_cars_to_pass < int(cars_allowed_to_pass * 0.75)):
-                reward += 500  # High reward for optimal decision
-            elif (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.8)):
-                reward += -750
+            if 0.6 <= congestion_ratio < 0.75:
+                reward += 1000 * efficiency
+            elif congestion_ratio >= 0.8:
+                reward -= 750
+            elif (predicted_cars_to_pass == 1 or predicted_green_time<80):
+                reward+= -2000
             else:
-                reward += -1000  # Apply penalty for wrong decision
+                reward -= 1000
         elif 50 <= cars_allowed_to_pass < 100:
-            if (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.7)) and (predicted_cars_to_pass <= int(cars_allowed_to_pass * 0.87)):
-                reward += 500  # Medium reward for optimal decision
-            elif (predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.9)):
-                reward += -800
-            elif predicted_cars_to_pass <= 50 * 0.7:
-                reward += -1000
+            if 0.7 <= congestion_ratio <= 0.87:
+                reward += 1000 * efficiency
+            elif congestion_ratio >= 0.9:
+                reward -= 800
+            elif congestion_ratio <= 0.7 or predicted_green_time<45:
+                reward -= 2000
             else:
-                reward += -1000  # Apply penalty for wrong decision
+                reward -= 1000
         elif 30 <= cars_allowed_to_pass < 50:
-            if predicted_cars_to_pass >= int(cars_allowed_to_pass * 0.8):
-                reward += 500  # Small reward for optimal decision
-            elif predicted_cars_to_pass <= (30 * 0.8):
-                reward += -1000
+            if congestion_ratio >= 0.8:
+                reward += 1000 * efficiency
+            elif congestion_ratio < 0.8 or predicted_green_time<70:
+                reward -= 1500
             else:
-                reward += -1000  # Apply penalty for wrong decision
+                reward -= 800
         elif cars_allowed_to_pass < 30:
             if predicted_cars_to_pass == cars_allowed_to_pass:
-                reward += 500  # Small reward for allowing all cars to pass
+                reward += 1000 * efficiency
+            elif abs(predicted_cars_to_pass-cars_allowed_to_pass)>3:
+                reward+= -1200
             elif predicted_cars_to_pass < cars_allowed_to_pass:
+                reward -= 1200
+            elif predicted_green_time> 70:
                 reward += -1000
             else:
-                reward += -1000  # Apply penalty for exceeding the number of cars
-
-        # Reward based on the predicted green time
-        if abs(predicted_green_time - formula_green_time) <4:
-            reward += 400  # Reward for being close to the formula
+                reward -= 1500
+        
+        if(formula_green_time>120):
+            if(predicted_green_time==120):
+                reward+= 950 *green_time_factor
+            else:
+                reward += -500
+        # Reward based on green time accuracy
+        if abs(predicted_green_time - formula_green_time) < 3:
+            reward += 850 * green_time_factor
         elif predicted_green_time < formula_green_time:
-            reward += -250
-            if predicted_green_time * 3 < formula_green_time:
-                reward += -300  # Penalty for underestimating green time
+            if abs(predicted_green_time - formula_green_time) > 5:
+                reward -= 450
+            elif predicted_green_time * 3 < formula_green_time:
+                reward -= 600
         elif predicted_green_time > formula_green_time + 5:
-            reward += -450  # Penalty for overestimating green time
-            if predicted_green_time > formula_green_time * 2:
-                reward += -200
+            if predicted_green_time - formula_green_time > 5:
+                reward -= 450
+            elif predicted_green_time > formula_green_time * 2:
+                reward -= 600
 
-        # Stronger penalty for extreme green time predictions
-        if predicted_green_time == 1 or predicted_green_time == 120:
-            reward += -1000
+        # Penalties for extreme green times
+        if predicted_green_time < 6:
+            reward -= 2000
 
-        # Apply additional penalty for predicting more cars than allowed to pass
+        # Penalty for overestimating cars
         if predicted_cars_to_pass > cars_allowed_to_pass:
-            reward += -2000  # Penalty for overestimating the number of cars
+            reward -= 2000
 
-        # Apply a time-decay factor to incentivize quicker congestion reduction
-        time_decay_factor = max(0, 50 - self.current_time // 10)  # Reduce reward as time progresses
+        # Time-decay factor
+        time_decay_factor = max(0, 50 - self.current_time // 10)
         reward += time_decay_factor
 
-        # Print the formulated green time for reference
         print(f"Formulated Green Time: {formula_green_time} seconds")
         return reward
 
