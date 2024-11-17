@@ -125,7 +125,7 @@ if __name__ == "__main__":
     agent = DQNAgent(state_size=state_size, action_size=action_size, epsilon_min=0.1)
 
     # Resume training loop
-    episode_to_resume = 264
+    episode_to_resume = 716
 
     for e in range(episode_to_resume, total_episodes):
         # Load the saved model at the beginning of each episode
@@ -133,9 +133,9 @@ if __name__ == "__main__":
             agent.load(f"dqn_model_tf_{e-4}")
 
         # Reset epsilon to boost exploration every 100 episodes
-        if (e % 100 == 0 and e<=700) or e%264 ==0:
-            agent.epsilon = 0.724  # Increase epsilon for more exploration
-            agent.epsilon_decay = 0.993  # Adjust decay rate to slow down exploration reduction
+        if (e % 100 == 0 and e<=1000) or e%716 ==0:
+            agent.epsilon = 0.53  # Increase epsilon for more exploration
+            agent.epsilon_decay = 0.997  # Adjust decay rate to slow down exploration reduction
 
         state = env.reset()
         done = False

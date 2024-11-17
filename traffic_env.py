@@ -57,38 +57,38 @@ class TrafficEnv:
 
         if cars_allowed_to_pass >= 100:
             if 0.6 <= congestion_ratio < 0.75:
-                reward += 1000 * efficiency
+                reward += 2000 * efficiency
             elif congestion_ratio >= 0.8:
-                reward -= 750
+                reward += 750
             elif (predicted_cars_to_pass == 1 or predicted_green_time<80):
-                reward+= -2000
+                reward += -2000
             else:
                 reward -= 1000
         elif 50 <= cars_allowed_to_pass < 100:
             if 0.7 <= congestion_ratio <= 0.87:
-                reward += 1000 * efficiency
+                reward += 2000 * efficiency
             elif congestion_ratio >= 0.9:
-                reward -= 800
+                reward += 300
             elif congestion_ratio <= 0.7 or predicted_green_time<45:
-                reward -= 2000
+                reward -= 1500
             else:
                 reward -= 1000
         elif 30 <= cars_allowed_to_pass < 50:
             if congestion_ratio >= 0.8:
-                reward += 1000 * efficiency
+                reward += 2000 * efficiency
             elif congestion_ratio < 0.8 or predicted_green_time<70:
                 reward -= 1500
             else:
                 reward -= 800
         elif cars_allowed_to_pass < 30:
             if predicted_cars_to_pass == cars_allowed_to_pass:
-                reward += 1000 * efficiency
+                reward += 2000 * efficiency
             elif abs(predicted_cars_to_pass-cars_allowed_to_pass)>3:
-                reward+= -1200
+                reward+= -1800
             elif predicted_cars_to_pass < cars_allowed_to_pass:
                 reward -= 1200
             elif predicted_green_time> 70:
-                reward += -1000
+                reward += -2000
             else:
                 reward -= 1500
         
@@ -97,19 +97,20 @@ class TrafficEnv:
                 reward+= 950 *green_time_factor
             else:
                 reward += -500
-        # Reward based on green time accuracy
-        if abs(predicted_green_time - formula_green_time) < 3:
-            reward += 850 * green_time_factor
-        elif predicted_green_time < formula_green_time:
-            if abs(predicted_green_time - formula_green_time) > 5:
-                reward -= 450
-            elif predicted_green_time * 3 < formula_green_time:
-                reward -= 600
-        elif predicted_green_time > formula_green_time + 5:
-            if predicted_green_time - formula_green_time > 5:
-                reward -= 450
-            elif predicted_green_time > formula_green_time * 2:
-                reward -= 600
+        else:
+
+            if abs(predicted_green_time - formula_green_time) < 3:
+                reward += 850 * green_time_factor
+            elif predicted_green_time < formula_green_time:
+                if abs(predicted_green_time - formula_green_time) > 5:
+                    reward -= 450
+                elif predicted_green_time * 3 < formula_green_time:
+                    reward -= 600
+            elif predicted_green_time > formula_green_time + 5:
+                if predicted_green_time - formula_green_time > 5:
+                    reward -= 450
+                elif predicted_green_time > formula_green_time * 2:
+                    reward -= 600
 
         # Penalties for extreme green times
         if predicted_green_time < 6:
