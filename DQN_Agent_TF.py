@@ -24,6 +24,30 @@ def scheduler(epoch, lr):
     else:
         return lr * tf.math.exp(-0.1)
 
+def predict_cars_and_green_time(cars_to_pass, formulated_green_time):
+    predicted_cars = 0
+
+    # Define ranges and corresponding logic
+    if 0 < cars_to_pass <= 30:
+        predicted_cars = int(0.9 * cars_to_pass) + random.randint(-2, 2)
+    elif 31 <= cars_to_pass <= 50:
+        predicted_cars = int(0.85 * cars_to_pass) + random.randint(-5, 5)
+    elif 51 <= cars_to_pass <= 100:
+        predicted_cars = int(0.75 * cars_to_pass) + random.randint(-5, 5)
+    elif 101 <= cars_to_pass < 120:
+        predicted_cars = int(0.65 * cars_to_pass) + random.randint(-5, 5)
+    elif cars_to_pass >= 120:
+        predicted_cars = 60
+    else:
+        print("Invalid number of cars to pass.")
+        return
+
+    # Ensure predicted cars are non-negative
+    predicted_cars = max(1, predicted_cars)
+    predicted_green_time = formulated_green_time + random.choice([-1,-2, 0, 0, 0, 0, -5,2, 5,3,1,6, 0, 0, 0])
+    
+    return [predicted_cars, predicted_green_time]
+
 class DQNAgent:
     def __init__(self, state_size, action_size, gamma=0.99, epsilon=1.0, epsilon_decay=0.99, epsilon_min=0.25, batch_size=2000, memory_size=35000):
         self.state_size = state_size
@@ -117,7 +141,7 @@ class DQNAgent:
 total_episodes = 1000
 # Main training loop
 if __name__ == "__main__":
-    traffic_data = pd.read_csv("output_file2.csv", header=None)
+    traffic_data = pd.read_csv("E:\\Codes\\SMART-TRAFFIC-AUTOMATION\\output_file2.csv", header=None)
     env = TrafficEnv(traffic_data)
 
     state_size = env.state.shape[0]
